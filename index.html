@@ -365,7 +365,7 @@
       <div class="step">
         <div class="step-circle">🤖</div>
         <h4>AI analyzes everything</h4>
-        <p>Claude AI reads your sales, inventory, traffic, and customer data.</p>
+        <p>Gemini AI reads your sales, inventory, traffic, and customer data.</p>
       </div>
       <div class="step">
         <div class="step-circle">🎯</div>
@@ -382,7 +382,7 @@
     <button class="btn-primary" onclick="showPage('dashboard')">Try the Dashboard Free →</button>
   </div>
 
-  <footer>© 2026 StoreIQ · Built with Claude AI · Made for ecommerce entrepreneurs</footer>
+  <footer>© 2026 StoreIQ · Built with Gemini AI · Made for ecommerce entrepreneurs</footer>
 </div>
 
 
@@ -460,8 +460,8 @@
       <div class="ai-insight-box">
         <div class="ai-insight-header">
           <div class="ai-logo">✦</div>
-          <span>AI Daily Insight — powered by Claude</span>
-          <div class="model-tag">claude-sonnet-4-6</div>
+          <span>AI Daily Insight — powered by Gemini</span>
+          <div class="model-tag">gemini-2.0-flash</div>
         </div>
         <div id="ai-output" class="loading">Analyzing your store data…</div>
         <div class="ai-actions">
@@ -619,34 +619,58 @@ document.getElementById('date-badge').textContent = now.toLocaleDateString('en-I
 
 // ── Sales chart ──
 const salesData = [8,11,7,13,10,15,9,14,12,18,11,16,14,18];
-const chart = document.getElementById('sales-chart');
+const chartEl = document.getElementById('sales-chart');
 const maxVal = Math.max(...salesData);
 salesData.forEach((v, i) => {
   const bar = document.createElement('div');
   bar.className = 'bar' + (i === salesData.length-1 ? ' today' : '');
   bar.style.height = (v / maxVal * 100) + '%';
   bar.title = '₹' + (v * 1024).toLocaleString('en-IN');
-  chart.appendChild(bar);
+  chartEl.appendChild(bar);
 });
 
-// ── Store data context for AI ──
-const storeContext = `
-You are an AI business co-pilot for a Shopify ecommerce store called "My Shopify Store".
-Here is the current store data:
+// ── API Key ──
+let GEMINI_API_KEY = localStorage.getItem('storeiq_key') || '';
+
+function showApiKeyModal() {
+  document.getElementById('api-modal').style.display = 'flex';
+}
+
+function saveApiKey() {
+  const val = document.getElementById('api-key-input').value.trim();
+  if (!val.startsWith('AIzaSy')) {
+    document.getElementById('api-key-error').textContent = '⚠️ Gemini keys start with AIzaSy — check and try again.';
+    return;
+  }
+  GEMINI_API_KEY = val;
+  localStorage.setItem('storeiq_key', val);
+  document.getElementById('api-modal').style.display = 'none';
+  document.getElementById('api-key-error').textContent = '';
+  callClaude('Give me a quick morning briefing — what are the 3 most important things I should focus on in my store today based on the data?');
+}
+
+function resetKey() {
+  GEMINI_API_KEY = '';
+  localStorage.removeItem('storeiq_key');
+  showApiKeyModal();
+}
+
+// ── Store context ──
+const storeContext = `You are an AI business co-pilot for a Shopify ecommerce store called "My Shopify Store".
+Current store data:
 - Today's revenue: ₹18,420 (up 23% vs yesterday)
 - Orders today: 47
 - Average order value: ₹391 (down 4% this week)
-- Cart abandonment rate: 68% (up 5% vs last week — concerning)
-- Top product: Leather Wallet (134 units, ₹26,800 revenue this week) — currently has ZERO ad spend
-- Second product: Running Shoes Pro (87 units) — critically low stock, only 4 units left, will sell out in 2 days
-- Canvas Backpack: 63 units sold, trending stable
+- Cart abandonment rate: 68% (up 5% vs last week — very concerning)
+- Top product: Leather Wallet (134 units, ₹26,800 this week) — ZERO ad spend currently
+- Running Shoes Pro: 87 units sold BUT only 4 units left in stock, will sell out in ~2 days
+- Canvas Backpack: 63 units, stable trend
 - Yoga Mat Elite: 41 units, slowing down
-- Steel Water Bottle: 29 units, declining trend
+- Steel Water Bottle: 29 units, declining
 
-Give actionable, specific, concise business advice. Use plain English. Be direct. Use bullet points with emojis for readability. Max 4 key points. Talk like a smart business advisor, not a robot.
-`;
+Give actionable, specific, plain-English advice. Be direct and friendly. Use bullet points with emojis. Max 4 key points. Talk like a sharp business advisor, not a robot.`;
 
-// ── AI insight call ──
+// ── Gemini API call ──
 async function callClaude(userMessage) {
   const output = document.getElementById('ai-output');
   const btn = document.getElementById('ai-send');
@@ -654,23 +678,34 @@ async function callClaude(userMessage) {
   output.textContent = 'Thinking…';
   btn.disabled = true;
 
+  if (!GEMINI_API_KEY) {
+    showApiKeyModal();
+    output.className = '';
+    output.textContent = 'Enter your API key to activate AI insights.';
+    btn.disabled = false;
+    return;
+  }
+
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        system: storeContext,
-        messages: [{ role: 'user', content: userMessage }]
+        contents: [{ parts: [{ text: storeContext + '\n\nUser question: ' + userMessage }] }]
       })
     });
-    const data = await response.json();
-    const text = data.content?.[0]?.text || 'No response received. Check your API key in the code.';
-    renderAIOutput(text);
+    const data = await res.json();
+    if (data.error) {
+      output.className = '';
+      output.innerHTML = `<span style="color:var(--red)">⚠️ ${data.error.message} — <span style="cursor:pointer;text-decoration:underline" onclick="resetKey()">re-enter API key</span></span>`;
+      btn.disabled = false;
+      return;
+    }
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    renderAIOutput(text || 'No response received.');
   } catch (err) {
     output.className = '';
-    output.textContent = '⚠️ Could not connect to Claude API. Make sure you have an API key set up. Error: ' + err.message;
+    output.innerHTML = `<span style="color:var(--red)">⚠️ Could not reach Gemini API. Check your internet connection. <span style="cursor:pointer;text-decoration:underline" onclick="resetKey()">Re-enter key</span></span>`;
   }
   btn.disabled = false;
 }
@@ -678,26 +713,22 @@ async function callClaude(userMessage) {
 function renderAIOutput(text) {
   const output = document.getElementById('ai-output');
   output.className = '';
-  // Render bullet lines nicely
   const lines = text.split('\n').filter(l => l.trim());
   output.innerHTML = lines.map(line => {
-    if (line.startsWith('- ') || line.startsWith('• ') || line.match(/^[\u2022\u25cf\u2013\-\*]/)) {
-      const content = line.replace(/^[-•*]\s*/, '').replace(/^\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      return `<div class="ai-output-point"><span class="bullet">→</span><span>${content}</span></div>`;
+    const clean = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    if (line.match(/^[-•*]\s/)) {
+      return `<div class="ai-output-point"><span class="bullet">→</span><span>${clean.replace(/^[-•*]\s*/,'')}</span></div>`;
     }
-    if (line.match(/^\*\*(.*?)\*\*/)) {
-      return `<p style="font-weight:600;color:var(--text);margin:8px 0 4px">${line.replace(/\*\*(.*?)\*\*/g,'$1')}</p>`;
-    }
-    return `<p style="margin:6px 0;color:var(--text-2)">${line}</p>`;
+    return `<p style="margin:6px 0;color:var(--text-2)">${clean}</p>`;
   }).join('');
 }
 
 function runAIInsight(type) {
   const prompts = {
-    revenue: 'Based on my store data, give me the top 3 specific actions I can take TODAY to increase revenue. Be very specific with numbers and tactics.',
-    inventory: 'Analyze my inventory situation and tell me exactly what to do about it. Which products need urgent restocking? What should I order more of?',
-    cart: 'My cart abandonment is 68% which is dangerously high. What are the most likely reasons and what are 3 specific things I can implement this week to reduce it?',
-    copy: 'Write a compelling product description for my top-selling product: the Leather Wallet. Make it persuasive, benefit-focused, and conversion-optimized for an Indian audience.'
+    revenue: 'What are the top 3 things I can do TODAY to increase revenue? Be specific with numbers and tactics.',
+    inventory: 'Analyze my inventory and tell me exactly what to restock urgently and what to watch out for.',
+    cart: 'My cart abandonment is 68% — that is dangerously high. Give me 3 specific things to implement this week to bring it down.',
+    copy: 'Write a short, compelling product description for my Leather Wallet. Persuasive, benefit-focused, optimized for Indian customers.'
   };
   callClaude(prompts[type]);
 }
@@ -714,12 +745,45 @@ document.getElementById('ai-prompt').addEventListener('keydown', e => {
   if (e.key === 'Enter') sendCustomPrompt();
 });
 
-// Auto-load a default insight
+// On load — show key modal if needed, else auto-brief
 window.addEventListener('load', () => {
   setTimeout(() => {
-    callClaude('Give me a quick morning briefing — what are the 3 most important things I should focus on in my store today based on the data?');
-  }, 600);
+    if (!CLAUDE_API_KEY) {
+      showApiKeyModal();
+    } else {
+      callClaude('Give me a quick morning briefing — what are the 3 most important things I should focus on in my store today based on the data?');
+    }
+  }, 500);
 });
 </script>
+<!-- API Key Modal -->
+<div id="api-modal" style="display:none;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:#13131a;border:1px solid rgba(124,111,255,0.3);border-radius:20px;padding:2.5rem;max-width:480px;width:100%;box-shadow:0 0 60px rgba(124,111,255,0.15);">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;">
+      <div style="width:40px;height:40px;border-radius:10px;background:rgba(124,111,255,0.2);display:flex;align-items:center;justify-content:center;font-size:20px;">✦</div>
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;color:#f0f0f5;">Activate AI Insights</div>
+        <div style="font-size:13px;color:#9090a8;">Enter your free Gemini API key to enable AI</div>
+      </div>
+    </div>
+    <div style="background:rgba(255,181,71,0.08);border:1px solid rgba(255,181,71,0.2);border-radius:10px;padding:12px 14px;margin-bottom:1.5rem;font-size:13px;color:#ffb547;line-height:1.6;">
+      🔑 Get your free API key at <a href="https://aistudio.google.com" target="_blank" style="color:#a594ff;text-decoration:underline;">aistudio.google.com</a> → Sign in with Google → Get API Key → Create Key. Completely free.
+    </div>
+    <input
+      id="api-key-input"
+      type="password"
+      placeholder="AIzaSy..."
+      style="width:100%;background:#1c1c26;border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 14px;color:#f0f0f5;font-family:'Inter',sans-serif;font-size:14px;outline:none;margin-bottom:8px;transition:border-color 0.2s;"
+      onfocus="this.style.borderColor='rgba(124,111,255,0.5)'"
+      onblur="this.style.borderColor='rgba(255,255,255,0.1)'"
+      onkeydown="if(event.key==='Enter')saveApiKey()"
+    />
+    <div id="api-key-error" style="font-size:12px;color:#ff6b6b;margin-bottom:12px;min-height:18px;"></div>
+    <button onclick="saveApiKey()" style="width:100%;background:#7c6fff;color:#fff;border:none;padding:13px;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+      Activate AI →
+    </button>
+    <p style="text-align:center;font-size:12px;color:#5a5a72;margin-top:14px;">Your key is saved only in your browser. We never see it.</p>
+  </div>
+</div>
 </body>
 </html>
